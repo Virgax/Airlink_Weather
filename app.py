@@ -1,10 +1,9 @@
 """
 Weather Banner Generator — Airlink Distribution DR
 FastAPI — Railway deployment
-Horizontal (1672x941) + Vertical (941x1672) per-template coordinates
 """
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from PIL import Image, ImageDraw, ImageFont
 import base64, io, os, logging, traceback
 
@@ -14,16 +13,19 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 BASE = os.path.dirname(os.path.abspath(__file__))
 
+# ── IN-MEMORY CACHE (last generated banners) ──────────────────────────────────
+_cache = {"horizontal": None, "vertical": None, "template": None}
+
 # ── TEMPLATE SELECTION ────────────────────────────────────────────────────────
 def select_name(condition_id: int) -> str:
     cid = int(condition_id)
-    if 200 <= cid < 300:                       return "Thunderstorm"
-    if 300 <= cid < 400 or 500 <= cid < 600:  return "Rainny"
-    if cid in [731,751,761,762]:               return "Sahara"
-    if cid == 800:                             return "Sunny"
+    if 200 <= cid < 300:                      return "Thunderstorm"
+    if 300 <= cid < 400 or 500 <= cid < 600: return "Rainny"
+    if cid in [731,751,761,762]:              return "Sahara"
+    if cid == 800:                            return "Sunny"
     return "Cloudy"
 
-# ── HORIZONTAL BOXES (1672x941, same for all templates) ───────────────────────
+# ── HORIZONTAL BOXES (1672x941) ───────────────────────────────────────────────
 sx, sy = 1672/960, 941/540
 def sc(x1,y1,x2,y2): return int(x1*sx),int(y1*sy),int(x2*sx),int(y2*sy)
 
@@ -37,7 +39,7 @@ BOXES_H = {
     "stat_cloud": sc(791.32,379.17,873.73,408.60),
 }
 
-# ── VERTICAL BOXES (941x1672, per-template calibrated) ───────────────────────
+# ── VERTICAL BOXES (941x1672, per-template) ───────────────────────────────────
 BOXES_V = {
     "Sunny": {
         "date_es":    ( 42,  873, 470,  929),
@@ -120,16 +122,13 @@ def draw_fitted(draw, box, text, max_size, min_size, color):
     tw,th = bb[2]-bb[0], bb[3]-bb[1]
     draw.text((x1+(bw-tw)//2, y1+(bh-th)//2), text, font=font, fill=color)
 
-# ── BANNER GENERATOR ──────────────────────────────────────────────────────────
-def generate_banner(data: dict, orientation: str) -> str:
-    name = select_name(int(data.get("condition_id", 800)))
+def generate_banner(data: dict, orientation: str) -> bytes:
+    name   = select_name(int(data.get("condition_id", 800)))
     suffix = "_Vertical" if orientation == "vertical" else ""
-    tpl = f"{name}{suffix}.png"
-    path = os.path.join(BASE, tpl)
+    path   = os.path.join(BASE, f"{name}{suffix}.png")
 
-    logger.info(f"[{orientation}] {tpl} exists={os.path.exists(path)}")
     if not os.path.exists(path):
-        raise FileNotFoundError(f"Not found: {path}. Files: {os.listdir(BASE)}")
+        raise FileNotFoundError(f"Not found: {path}")
 
     img  = Image.open(path).convert("RGBA")
     draw = ImageDraw.Draw(img)
@@ -145,40 +144,72 @@ def generate_banner(data: dict, orientation: str) -> str:
         fs    = get_font(42)
         dm, dn = 24, 13
 
-    draw_fitted (draw, boxes["date_es"],    data.get("date_es",""),          dm, dn, WHITE)
-    draw_fitted (draw, boxes["date_en"],    data.get("date_en",""),          dm, dn, WHITE)
-    draw_centered(draw, boxes["stat_temp"],  f"{data.get('temp','--')}°C",   fs, BLUE)
-    draw_centered(draw, boxes["stat_feels"], f"{data.get('feels','--')}°C",  fs, BLUE)
-    draw_centered(draw, boxes["stat_hum"],   f"{data.get('humidity','--')}%",fs, BLUE)
-    draw_centered(draw, boxes["stat_wind"],  f"{data.get('wind','--')} m/s", fs, BLUE)
-    draw_centered(draw, boxes["stat_cloud"], f"{data.get('cloud','--')}%",   fs, BLUE)
+    draw_fitted (draw, boxes["date_es"],    data.get("date_es",""),           dm, dn, WHITE)
+    draw_fitted (draw, boxes["date_en"],    data.get("date_en",""),           dm, dn, WHITE)
+    draw_centered(draw, boxes["stat_temp"],  f"{data.get('temp','--')}°C",    fs, BLUE)
+    draw_centered(draw, boxes["stat_feels"], f"{data.get('feels','--')}°C",   fs, BLUE)
+    draw_centered(draw, boxes["stat_hum"],   f"{data.get('humidity','--')}%", fs, BLUE)
+    draw_centered(draw, boxes["stat_wind"],  f"{data.get('wind','--')} m/s",  fs, BLUE)
+    draw_centered(draw, boxes["stat_cloud"], f"{data.get('cloud','--')}%",    fs, BLUE)
 
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="PNG", optimize=True)
-    return base64.b64encode(buf.getvalue()).decode()
+    return buf.getvalue()
 
 # ── ENDPOINTS ─────────────────────────────────────────────────────────────────
 @app.get("/")
 def root():
-    return {"status": "ok", "service": "Weather Banner Generator — Airlink DR"}
+    return {"status": "ok", "service": "Weather Banner Generator — Airlink DR",
+            "cached_template": _cache["template"]}
 
 @app.get("/health")
 def health():
-    pngs = [f for f in os.listdir(BASE) if f.endswith(".png")]
-    return {"status": "ok", "templates": sorted(pngs)}
+    pngs = sorted([f for f in os.listdir(BASE) if f.endswith(".png")])
+    return {"status": "ok", "templates": pngs, "cached": _cache["template"]}
 
 @app.post("/generate")
 async def generate(request: Request):
+    """PA calls this → generates + caches both banners."""
     try:
         data = await request.json()
-        logger.info(f"condition_id={data.get('condition_id')}")
-        h = generate_banner(data, "horizontal")
-        v = generate_banner(data, "vertical")
-        name = select_name(int(data.get("condition_id", 800)))
-        return JSONResponse({"horizontal": h, "vertical": v,
-                             "template": name, "status": "ok"})
+        logger.info(f"Generate: condition_id={data.get('condition_id')}")
+
+        h_bytes = generate_banner(data, "horizontal")
+        v_bytes = generate_banner(data, "vertical")
+        name    = select_name(int(data.get("condition_id", 800)))
+
+        # Cache as raw bytes for NoviSign endpoints
+        _cache["horizontal"] = h_bytes
+        _cache["vertical"]   = v_bytes
+        _cache["template"]   = name
+
+        return JSONResponse({
+            "horizontal": base64.b64encode(h_bytes).decode(),
+            "vertical":   base64.b64encode(v_bytes).decode(),
+            "template":   name,
+            "status":     "ok",
+            "novisign": {
+                "horizontal": "https://airlinkweather-production.up.railway.app/banner/horizontal",
+                "vertical":   "https://airlinkweather-production.up.railway.app/banner/vertical"
+            }
+        })
     except Exception as e:
         tb = traceback.format_exc()
         logger.error(f"{e}\n{tb}")
-        return JSONResponse({"horizontal":"","vertical":"","template":"",
-                             "status":f"error: {str(e)}","traceback":tb}, status_code=500)
+        return JSONResponse({"status": f"error: {str(e)}", "traceback": tb}, status_code=500)
+
+@app.get("/banner/horizontal")
+def banner_horizontal():
+    """NoviSign calls this URL — always returns latest horizontal PNG."""
+    if _cache["horizontal"] is None:
+        return JSONResponse({"error": "No banner generated yet. Call POST /generate first."}, status_code=404)
+    return Response(content=_cache["horizontal"], media_type="image/png",
+                    headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+@app.get("/banner/vertical")
+def banner_vertical():
+    """NoviSign calls this URL — always returns latest vertical PNG."""
+    if _cache["vertical"] is None:
+        return JSONResponse({"error": "No banner generated yet. Call POST /generate first."}, status_code=404)
+    return Response(content=_cache["vertical"], media_type="image/png",
+                    headers={"Cache-Control": "no-cache, no-store, must-revalidate"})

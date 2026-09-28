@@ -13,10 +13,8 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 BASE = os.path.dirname(os.path.abspath(__file__))
 
-# ── IN-MEMORY CACHE (last generated banners) ──────────────────────────────────
 _cache = {"horizontal": None, "vertical": None, "template": None}
 
-# ── TEMPLATE SELECTION ────────────────────────────────────────────────────────
 def select_name(condition_id: int) -> str:
     cid = int(condition_id)
     if 200 <= cid < 300:                      return "Thunderstorm"
@@ -25,7 +23,6 @@ def select_name(condition_id: int) -> str:
     if cid == 800:                            return "Sunny"
     return "Cloudy"
 
-# ── HORIZONTAL BOXES (1672x941) ───────────────────────────────────────────────
 sx, sy = 1672/960, 941/540
 def sc(x1,y1,x2,y2): return int(x1*sx),int(y1*sy),int(x2*sx),int(y2*sy)
 
@@ -39,7 +36,6 @@ BOXES_H = {
     "stat_cloud": sc(791.32,379.17,873.73,408.60),
 }
 
-# ── VERTICAL BOXES (941x1672, per-template) ───────────────────────────────────
 BOXES_V = {
     "Sunny": {
         "date_es":    ( 42,  873, 470,  929),
@@ -88,7 +84,6 @@ BOXES_V = {
     },
 }
 
-# ── FONTS ─────────────────────────────────────────────────────────────────────
 def get_font(size):
     for p in [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -128,7 +123,7 @@ def generate_banner(data: dict, orientation: str) -> bytes:
     path   = os.path.join(BASE, f"{name}{suffix}.png")
 
     if not os.path.exists(path):
-        raise FileNotFoundError(f"Not found: {path}")
+        raise FileNotFoundError(f"Not found: {path}. Files: {os.listdir(BASE)}")
 
     img  = Image.open(path).convert("RGBA")
     draw = ImageDraw.Draw(img)
@@ -152,11 +147,14 @@ def generate_banner(data: dict, orientation: str) -> bytes:
     draw_centered(draw, boxes["stat_wind"],  f"{data.get('wind','--')} m/s",  fs, BLUE)
     draw_centered(draw, boxes["stat_cloud"], f"{data.get('cloud','--')}%",    fs, BLUE)
 
+    # ── Resize to NoviSign canvas ─────────────────────────────────────────────
+    target = (1920, 1080) if orientation == "horizontal" else (1080, 1920)
+    final  = img.convert("RGB").resize(target, Image.LANCZOS)
+
     buf = io.BytesIO()
-    img.convert("RGB").save(buf, format="PNG", optimize=True)
+    final.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
 
-# ── ENDPOINTS ─────────────────────────────────────────────────────────────────
 @app.get("/")
 def root():
     return {"status": "ok", "service": "Weather Banner Generator — Airlink DR",
@@ -169,7 +167,6 @@ def health():
 
 @app.post("/generate")
 async def generate(request: Request):
-    """PA calls this → generates + caches both banners."""
     try:
         data = await request.json()
         logger.info(f"Generate: condition_id={data.get('condition_id')}")
@@ -178,7 +175,6 @@ async def generate(request: Request):
         v_bytes = generate_banner(data, "vertical")
         name    = select_name(int(data.get("condition_id", 800)))
 
-        # Cache as raw bytes for NoviSign endpoints
         _cache["horizontal"] = h_bytes
         _cache["vertical"]   = v_bytes
         _cache["template"]   = name
@@ -200,16 +196,14 @@ async def generate(request: Request):
 
 @app.get("/banner/horizontal")
 def banner_horizontal():
-    """NoviSign calls this URL — always returns latest horizontal PNG."""
     if _cache["horizontal"] is None:
-        return JSONResponse({"error": "No banner generated yet. Call POST /generate first."}, status_code=404)
+        return JSONResponse({"error": "No banner yet. Call POST /generate first."}, status_code=404)
     return Response(content=_cache["horizontal"], media_type="image/png",
                     headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 @app.get("/banner/vertical")
 def banner_vertical():
-    """NoviSign calls this URL — always returns latest vertical PNG."""
     if _cache["vertical"] is None:
-        return JSONResponse({"error": "No banner generated yet. Call POST /generate first."}, status_code=404)
+        return JSONResponse({"error": "No banner yet. Call POST /generate first."}, status_code=404)
     return Response(content=_cache["vertical"], media_type="image/png",
                     headers={"Cache-Control": "no-cache, no-store, must-revalidate"})

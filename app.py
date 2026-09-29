@@ -490,10 +490,15 @@ async def generate(request: Request):
         with open(_weather_disk_path("v"), "wb") as f:
             f.write(v_raw)
 
+        h_b64 = base64.b64encode(h_raw).decode()
+        v_b64 = base64.b64encode(v_raw).decode()
         return JSONResponse({
-            "image_b64": base64.b64encode(h_raw).decode(),
-            "template":  select_template(cid),
-            "status":    "ok",
+            "image_b64":   h_b64,          # legacy key (horizontal)
+            "image_b64_h": h_b64,
+            "image_b64_v": v_b64,
+            "template":    select_template(cid),
+            "template_v":  select_template(cid, vertical=True),
+            "status":      "ok",
         })
     except Exception as e:
         return JSONResponse(

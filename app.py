@@ -43,43 +43,55 @@ BOXES = {
 }
 
 # ── Vertical weather template boxes (per-template, calibrated on 941×1672 native) ──
-# Stat box coordinates derived from PPTX text box positions (ground truth).
-# Slide 7 of the reference PPTX shows both a Rainny (left) and Sunny (right)
-# vertical banner with identical relative layouts — all 5 templates share the
-# same stat coordinates.  Dates are kept per-template (not in PPTX).
-# Scale: 941 px / 10.72 cm = 87.78 px/cm  (native 941×1672 template space).
-_STATS_V = {
-    "stat_temp":  ( 82, 1056, 280, 1110),
-    "stat_feels": (374, 1056, 573, 1110),
-    "stat_hum":   (667, 1056, 865, 1110),
-    "stat_wind":  (181, 1310, 380, 1364),
-    "stat_cloud": (568, 1310, 766, 1364),
-}
+# ALL coordinates (dates + stats) derived from the dates PPTX (a7648314) text box
+# positions — ground truth.  Each template has its own layout: Rainny's stat
+# ellipses sit ~29 px lower than the other four, and Sahara is shifted ~5 px right.
+# Scale: 941 px / 10.721 cm = 87.77 px/cm  (native 941×1672 template space).
 BOXES_V_PER_TEMPLATE = {
-    "Cloudy": {
-        "date_es": (55,  864, 355, 929),
-        "date_en": (370, 864, 730, 929),
-        **_STATS_V,
+    "Sunny": {             # image6, Slide 6 Panel A
+        "date_es":    ( 68,  878, 458,  923),
+        "date_en":    (483,  878, 873,  923),
+        "stat_temp":  ( 80, 1057, 278, 1111),
+        "stat_feels": (372, 1057, 570, 1111),
+        "stat_hum":   (664, 1057, 862, 1111),
+        "stat_wind":  (179, 1311, 377, 1365),
+        "stat_cloud": (565, 1311, 763, 1365),
     },
-    "Sunny": {
-        "date_es": (55,  871, 355, 933),
-        "date_en": (370, 871, 730, 933),
-        **_STATS_V,
+    "Cloudy": {            # image7, Slide 6 Panel C
+        "date_es":    ( 68,  871, 458,  916),
+        "date_en":    (483,  871, 873,  916),
+        "stat_temp":  ( 79, 1057, 277, 1111),
+        "stat_feels": (371, 1057, 569, 1111),
+        "stat_hum":   (663, 1057, 861, 1111),
+        "stat_wind":  (178, 1311, 376, 1365),
+        "stat_cloud": (564, 1311, 762, 1365),
     },
-    "Rainny": {
-        "date_es": (55,  899, 355, 961),
-        "date_en": (370, 899, 730, 961),
-        **_STATS_V,
+    "Rainny": {            # image8, Slide 6 Panel B — stats are LOWER on this template
+        "date_es":    ( 68,  905, 458,  950),
+        "date_en":    (483,  905, 873,  950),
+        "stat_temp":  ( 79, 1085, 277, 1139),
+        "stat_feels": (371, 1085, 569, 1139),
+        "stat_hum":   (663, 1085, 861, 1139),
+        "stat_wind":  (178, 1339, 376, 1393),
+        "stat_cloud": (564, 1339, 762, 1393),
     },
-    "Sahara": {
-        "date_es": (55,  864, 355, 931),
-        "date_en": (370, 864, 730, 931),
-        **_STATS_V,
+    "Thunderstorm": {      # image9, Slide 7 Panel D
+        "date_es":    ( 68,  872, 458,  917),
+        "date_en":    (482,  872, 872,  917),
+        "stat_temp":  ( 79, 1056, 277, 1110),
+        "stat_feels": (371, 1056, 569, 1110),
+        "stat_hum":   (663, 1056, 861, 1110),
+        "stat_wind":  (178, 1310, 376, 1364),
+        "stat_cloud": (564, 1310, 762, 1364),
     },
-    "Thunderstorm": {
-        "date_es": (55,  862, 355, 928),
-        "date_en": (370, 862, 730, 928),
-        **_STATS_V,
+    "Sahara": {            # image10, Slide 7 Panel E
+        "date_es":    ( 71,  875, 461,  920),
+        "date_en":    (486,  875, 876,  920),
+        "stat_temp":  ( 85, 1056, 283, 1110),
+        "stat_feels": (377, 1056, 575, 1110),
+        "stat_hum":   (669, 1056, 867, 1110),
+        "stat_wind":  (184, 1310, 382, 1364),
+        "stat_cloud": (570, 1310, 768, 1364),
     },
 }
 

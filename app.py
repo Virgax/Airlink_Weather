@@ -19,13 +19,14 @@ app = FastAPI()
 #  WEATHER — original code
 # ═══════════════════════════════════════════════════════════════
 
-def select_template(condition_id: int) -> str:
+def select_template(condition_id: int, vertical: bool = False) -> str:
     cid = int(condition_id)
-    if 200 <= cid < 300:                   return "Thunderstorm.png"
-    if 300 <= cid < 400 or 500 <= cid < 600: return "Rainny.png"
-    if cid in [731, 751, 761, 762]:         return "Sahara.png"
-    if cid == 800:                          return "Sunny.png"
-    return "Cloudy.png"
+    suffix = "_Vertical" if vertical else ""
+    if 200 <= cid < 300:                     return f"Thunderstorm{suffix}.png"
+    if 300 <= cid < 400 or 500 <= cid < 600: return f"Rainny{suffix}.png"
+    if cid in [731, 751, 761, 762]:           return f"Sahara{suffix}.png"
+    if cid == 800:                            return f"Sunny{suffix}.png"
+    return f"Cloudy{suffix}.png"
 
 sx, sy = 1672/960, 941/540
 def sc(x1, y1, x2, y2):
@@ -40,6 +41,56 @@ BOXES = {
     "stat_wind":  sc(589.13, 378.49, 714.56, 408.60),
     "stat_cloud": sc(791.32, 379.17, 873.73, 408.60),
 }
+
+# ── Vertical weather template boxes (per-template, calibrated on 941×1672 native) ──
+# Stat box coordinates derived from PPTX text box positions (ground truth).
+# Slide 7 of the reference PPTX shows both a Rainny (left) and Sunny (right)
+# vertical banner with identical relative layouts — all 5 templates share the
+# same stat coordinates.  Dates are kept per-template (not in PPTX).
+# Scale: 941 px / 10.72 cm = 87.78 px/cm  (native 941×1672 template space).
+_STATS_V = {
+    "stat_temp":  ( 82, 1056, 280, 1110),
+    "stat_feels": (374, 1056, 573, 1110),
+    "stat_hum":   (667, 1056, 865, 1110),
+    "stat_wind":  (181, 1310, 380, 1364),
+    "stat_cloud": (568, 1310, 766, 1364),
+}
+BOXES_V_PER_TEMPLATE = {
+    "Cloudy": {
+        "date_es": (55,  864, 355, 929),
+        "date_en": (370, 864, 730, 929),
+        **_STATS_V,
+    },
+    "Sunny": {
+        "date_es": (55,  871, 355, 933),
+        "date_en": (370, 871, 730, 933),
+        **_STATS_V,
+    },
+    "Rainny": {
+        "date_es": (55,  899, 355, 961),
+        "date_en": (370, 899, 730, 961),
+        **_STATS_V,
+    },
+    "Sahara": {
+        "date_es": (55,  864, 355, 931),
+        "date_en": (370, 864, 730, 931),
+        **_STATS_V,
+    },
+    "Thunderstorm": {
+        "date_es": (55,  862, 355, 928),
+        "date_en": (370, 862, 730, 928),
+        **_STATS_V,
+    },
+}
+
+def _get_boxes_v(condition_id: int) -> dict:
+    """Return per-template BOXES_V for the given condition_id."""
+    cid = int(condition_id)
+    if 200 <= cid < 300:                     return BOXES_V_PER_TEMPLATE["Thunderstorm"]
+    if 300 <= cid < 400 or 500 <= cid < 600: return BOXES_V_PER_TEMPLATE["Rainny"]
+    if cid in [731, 751, 761, 762]:           return BOXES_V_PER_TEMPLATE["Sahara"]
+    if cid == 800:                            return BOXES_V_PER_TEMPLATE["Sunny"]
+    return BOXES_V_PER_TEMPLATE["Cloudy"]
 
 def _base_dir():
     return os.path.dirname(os.path.abspath(__file__))
@@ -81,43 +132,59 @@ def draw_fitted(draw, box, text, font_size, color, min_size=10):
     tw, th = bb[2]-bb[0], bb[3]-bb[1]
     draw.text((x1 + max(0,(bw-tw)//2), y1 + max(0,(bh-th)//2)), text, font=font, fill=color)
 
-def generate_banner(data: dict) -> str:
-    tpl = select_template(int(data.get("condition_id", 800)))
+def _render_weather(data: dict, boxes: dict, condition_id: int, vertical: bool) -> bytes:
+    tpl = select_template(condition_id, vertical=vertical)
     path = os.path.join(_base_dir(), tpl)
     img = Image.open(path).convert("RGBA")
     draw = ImageDraw.Draw(img)
     BLUE  = (37, 92, 170, 255)
     WHITE = (255, 255, 255, 255)
-    draw_fitted(draw, BOXES["date_es"],    data.get("date_es", ""),          27, WHITE)
-    draw_fitted(draw, BOXES["date_en"],    data.get("date_en", ""),          27, WHITE)
-    draw_fitted(draw, BOXES["stat_temp"],  f"{data.get('temp','--')}°C",     38, BLUE)
-    draw_fitted(draw, BOXES["stat_feels"], f"{data.get('feels','--')}°C",    38, BLUE)
-    draw_fitted(draw, BOXES["stat_hum"],   f"{data.get('humidity','--')}%",  38, BLUE)
-    draw_fitted(draw, BOXES["stat_wind"],  f"{data.get('wind','--')} m/s",   38, BLUE)
-    draw_fitted(draw, BOXES["stat_cloud"], f"{data.get('cloud','--')}%",     38, BLUE)
+    # For vertical, use per-template calibrated boxes; for horizontal, use passed boxes
+    b = _get_boxes_v(condition_id) if vertical else boxes
+    draw_fitted(draw, b["date_es"],    data.get("date_es", ""),          27, WHITE)
+    draw_fitted(draw, b["date_en"],    data.get("date_en", ""),          27, WHITE)
+    draw_fitted(draw, b["stat_temp"],  f"{data.get('temp','--')}°C",     38, BLUE)
+    draw_fitted(draw, b["stat_feels"], f"{data.get('feels','--')}°C",    38, BLUE)
+    draw_fitted(draw, b["stat_hum"],   f"{data.get('humidity','--')}%",  38, BLUE)
+    draw_fitted(draw, b["stat_wind"],  f"{data.get('wind','--')} m/s",   38, BLUE)
+    draw_fitted(draw, b["stat_cloud"], f"{data.get('cloud','--')}%",     38, BLUE)
+    # Resize to standard NoviSign resolution
+    out_size = (1080, 1920) if vertical else (1920, 1080)
+    img = img.resize(out_size, Image.LANCZOS)
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="PNG", optimize=True)
-    return base64.b64encode(buf.getvalue()).decode()
+    return buf.getvalue()
+
+def generate_banner(data: dict) -> str:
+    cid = int(data.get("condition_id", 800))
+    raw = _render_weather(data, BOXES, cid, vertical=False)
+    return base64.b64encode(raw).decode()
 
 
 # ── Weather in-memory + disk cache ────────────────────────────
-_weather_png: bytes | None = None
+_weather_h_png: bytes | None = None
+_weather_v_png: bytes | None = None
 
-def _weather_disk_path():
+def _weather_disk_path(orientation: str) -> str:
     p = os.path.join(_base_dir(), "weather_cache")
     os.makedirs(p, exist_ok=True)
-    return os.path.join(p, "current.png")
+    return os.path.join(p, f"current_{orientation}.png")
 
-def _get_weather_png() -> bytes | None:
-    global _weather_png
-    if _weather_png:
-        return _weather_png
-    # fallback: reload from disk after container restart
-    path = _weather_disk_path()
+def _get_weather_png(orientation: str) -> bytes | None:
+    global _weather_h_png, _weather_v_png
+    cached = _weather_h_png if orientation == "h" else _weather_v_png
+    if cached:
+        return cached
+    path = _weather_disk_path(orientation)
     if os.path.exists(path):
         with open(path, "rb") as f:
-            _weather_png = f.read()
-    return _weather_png
+            data = f.read()
+        if orientation == "h":
+            _weather_h_png = data
+        else:
+            _weather_v_png = data
+        return data
+    return None
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -394,18 +461,26 @@ def root():
 
 @app.post("/generate")
 async def generate(request: Request):
-    global _weather_png
+    global _weather_h_png, _weather_v_png
     try:
         data = await request.json()
-        b64 = generate_banner(data)
-        # Cache PNG in memory and on disk for NoviSign polling
-        raw = base64.b64decode(b64)
-        _weather_png = raw
-        with open(_weather_disk_path(), "wb") as f:
-            f.write(raw)
+        cid  = int(data.get("condition_id", 800))
+
+        # Generate H
+        h_raw = _render_weather(data, BOXES, cid, vertical=False)
+        _weather_h_png = h_raw
+        with open(_weather_disk_path("h"), "wb") as f:
+            f.write(h_raw)
+
+        # Generate V (boxes auto-selected per template inside _render_weather)
+        v_raw = _render_weather(data, {}, cid, vertical=True)
+        _weather_v_png = v_raw
+        with open(_weather_disk_path("v"), "wb") as f:
+            f.write(v_raw)
+
         return JSONResponse({
-            "image_b64": b64,
-            "template":  select_template(int(data.get("condition_id", 800))),
+            "image_b64": base64.b64encode(h_raw).decode(),
+            "template":  select_template(cid),
             "status":    "ok",
         })
     except Exception as e:
@@ -414,13 +489,19 @@ async def generate(request: Request):
             status_code=500,
         )
 
-@app.get("/weather/current")
-def weather_current():
-    """
-    NoviSign polls this fixed URL for the latest weather banner.
-    Returns 204 if no banner has been generated yet today.
-    """
-    png = _get_weather_png()
+@app.get("/weather/horizontal")
+def weather_horizontal():
+    """NoviSign polls this for the latest horizontal weather banner."""
+    png = _get_weather_png("h")
+    if png is None:
+        return Response(status_code=204)
+    return Response(content=png, media_type="image/png",
+                    headers={"Cache-Control": "no-store"})
+
+@app.get("/weather/vertical")
+def weather_vertical():
+    """NoviSign polls this for the latest vertical weather banner."""
+    png = _get_weather_png("v")
     if png is None:
         return Response(status_code=204)
     return Response(content=png, media_type="image/png",

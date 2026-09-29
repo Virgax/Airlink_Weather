@@ -493,16 +493,16 @@ async def generate(request: Request):
         h_b64 = base64.b64encode(h_raw).decode()
         v_b64 = base64.b64encode(v_raw).decode()
         return JSONResponse({
+            "horizontal":  h_b64,          # keys the PA flow reads (Compose_BannerH / V)
+            "vertical":    v_b64,
             "image_b64":   h_b64,          # legacy key (horizontal)
-            "image_b64_h": h_b64,
-            "image_b64_v": v_b64,
             "template":    select_template(cid),
             "template_v":  select_template(cid, vertical=True),
             "status":      "ok",
         })
     except Exception as e:
         return JSONResponse(
-            {"image_b64": "", "template": "", "status": f"error: {e}"},
+            {"horizontal": "", "vertical": "", "image_b64": "", "template": "", "status": f"error: {e}"},
             status_code=500,
         )
 
